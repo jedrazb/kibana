@@ -6,16 +6,17 @@
  */
 
 import type { RouteDependencies } from './types';
+import type { OnechatConfig } from '../config';
 import { registerToolsRoutes } from './tools';
 import { registerAgentRoutes } from './agents';
 import { registerChatRoutes } from './chat';
 import { registerConversationRoutes } from './conversations';
 import { registerMCPRoutes } from './mcp';
 
-export const registerRoutes = (dependencies: RouteDependencies) => {
+export const registerRoutes = (dependencies: RouteDependencies, config: OnechatConfig) => {
   registerToolsRoutes(dependencies);
   registerAgentRoutes(dependencies);
   registerChatRoutes(dependencies);
   registerConversationRoutes(dependencies);
-  registerMCPRoutes(dependencies);
+  registerMCPRoutes(dependencies, config);
 };

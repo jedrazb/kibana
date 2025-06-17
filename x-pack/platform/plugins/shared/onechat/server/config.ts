@@ -10,6 +10,16 @@ import { schema, type TypeOf } from '@kbn/config-schema';
 
 export const configSchema = schema.object({
   enabled: schema.boolean({ defaultValue: true }),
+  oauth: schema.maybe(
+    schema.object({
+      github: schema.maybe(
+        schema.object({
+          clientId: schema.string(),
+          clientSecret: schema.string(),
+        })
+      ),
+    })
+  ),
 });
 
 export type OnechatConfig = TypeOf<typeof configSchema>;

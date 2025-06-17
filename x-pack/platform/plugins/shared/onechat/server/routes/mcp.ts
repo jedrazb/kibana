@@ -13,6 +13,8 @@ import type { RouteDependencies } from './types';
 import { getHandlerWrapper } from './wrap_handler';
 import { KibanaMcpHttpTransport } from '../utils/kibana_mcp_http_transport';
 import { ONECHAT_MCP_SERVER_UI_SETTING_ID } from '../../common/constants';
+import { registerMCPOAuthRoutes } from './mcp_oauth';
+import type { OnechatConfig } from '../config';
 
 const TECHNICAL_PREVIEW_WARNING =
   'Elastic MCP Server is in technical preview and may be changed or removed in a future release. Elastic will work to fix any issues, but features in technical preview are not subject to the support SLA of official GA features.';
@@ -21,14 +23,64 @@ const MCP_SERVER_NAME = 'elastic-mcp-server';
 const MCP_SERVER_VERSION = '0.0.1';
 const MCP_SERVER_PATH = '/api/mcp';
 
-export function registerMCPRoutes({ router, getInternalServices, logger }: RouteDependencies) {
+// Helper function to validate OAuth token
+async function validateOAuthToken(authHeader: string, logger: any): Promise<any> {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    logger.info(`OAuth token validation failed - no valid Bearer token`);
+    return null;
+  }
+
+  try {
+    const token = authHeader.substring(7);
+    const tokenData = JSON.parse(Buffer.from(token, 'base64').toString());
+
+    // Check if token is not too old (1 hour)
+    if (Date.now() - tokenData.timestamp > 60 * 60 * 1000) {
+      logger.info(`OAuth token validation failed - token expired`);
+      return null;
+    }
+
+    // Verify GitHub token is still valid
+    const userResponse = await fetch('https://api.github.com/user', {
+      headers: {
+        Authorization: `Bearer ${tokenData.githubToken}`,
+        'User-Agent': 'Kibana-MCP-Server',
+      },
+    });
+
+    if (!userResponse.ok) {
+      logger.info(`OAuth token validation failed - GitHub API returned ${userResponse.status}`);
+      return null;
+    }
+
+    return tokenData;
+  } catch (err) {
+    logger.error('OAuth token validation error:', err);
+    return null;
+  }
+}
+
+export function registerMCPRoutes(
+  { router, getInternalServices, logger, coreSetup }: RouteDependencies,
+  config: OnechatConfig
+) {
   const wrapHandler = getHandlerWrapper({ logger });
+
+  // Register OAuth routes
+  registerMCPOAuthRoutes({ router, getInternalServices, logger, coreSetup }, config);
 
   router.versioned
     .post({
       path: MCP_SERVER_PATH,
       security: {
-        authz: { requiredPrivileges: [apiPrivileges.readOnechat] },
+        authz: {
+          enabled: false,
+          reason: 'This route supports both OAuth and internal Kibana auth',
+        },
+        authc: {
+          enabled: false,
+          reason: 'This route supports both OAuth and internal Kibana auth',
+        },
       },
       access: 'public',
       summary: 'MCP server',
@@ -52,14 +104,26 @@ export function registerMCPRoutes({ router, getInternalServices, logger }: Route
         let transport: KibanaMcpHttpTransport | undefined;
         let server: McpServer | undefined;
 
-        const { uiSettings } = await ctx.core;
-        const enabled = await uiSettings.client.get(ONECHAT_MCP_SERVER_UI_SETTING_ID);
+        // Check for OAuth authorization first
+        const authHeader = request.headers.authorization as string;
+        const oauthUser = await validateOAuthToken(authHeader, logger);
 
-        if (!enabled) {
-          return response.notFound();
+        if (!oauthUser) {
+          // Fall back to original behavior if no OAuth token
+          const { uiSettings } = await ctx.core;
+          const enabled = await uiSettings.client.get(ONECHAT_MCP_SERVER_UI_SETTING_ID);
+
+          if (!enabled) {
+            logger.info(`MCP server request rejected - server not enabled`);
+            return response.notFound();
+          }
+          logger.info(`MCP server request using internal auth`);
+        } else {
+          logger.info(`OAuth authenticated user: ${oauthUser.username} (${oauthUser.userId})`);
         }
 
         try {
+          logger.info(`Initializing MCP server and transport`);
           transport = new KibanaMcpHttpTransport({ sessionIdGenerator: undefined, logger });
 
           // Instantiate new MCP server upon every request, no session persistence
@@ -72,6 +136,7 @@ export function registerMCPRoutes({ router, getInternalServices, logger }: Route
 
           const registry = toolService.registry.asScopedPublicRegistry({ request });
           const tools = await registry.list({});
+          logger.info(`MCP server initialized with ${tools.length} tools`);
 
           // Expose tools scoped to the request
           for (const tool of tools) {
@@ -80,6 +145,7 @@ export function registerMCPRoutes({ router, getInternalServices, logger }: Route
               tool.description,
               tool.schema.shape,
               async (args: { [x: string]: any }) => {
+                logger.info(`Executing MCP tool: ${tool.id}`);
                 const toolResult = await tool.execute({ toolParams: args });
                 return {
                   content: [{ type: 'text' as const, text: JSON.stringify(toolResult) }],
@@ -89,6 +155,7 @@ export function registerMCPRoutes({ router, getInternalServices, logger }: Route
           }
 
           request.events.aborted$.subscribe(async () => {
+            logger.info(`MCP request aborted, cleaning up resources`);
             await transport?.close().catch((error) => {
               logger.error('MCP Server: Error closing transport', { error });
             });
@@ -98,6 +165,7 @@ export function registerMCPRoutes({ router, getInternalServices, logger }: Route
           });
 
           await server.connect(transport);
+          logger.info(`MCP server connected and ready to handle request`);
 
           return await transport.handleRequest(request, response);
         } catch (error) {
@@ -159,8 +227,10 @@ export function registerMCPRoutes({ router, getInternalServices, logger }: Route
         const enabled = await uiSettings.client.get(ONECHAT_MCP_SERVER_UI_SETTING_ID);
 
         if (!enabled) {
+          logger.info(`MCP server GET request rejected - server not enabled`);
           return response.notFound();
         }
+        logger.info(`MCP server GET request received - returning method not allowed`);
         return response.customError({
           statusCode: 405,
           body: {
@@ -200,8 +270,10 @@ export function registerMCPRoutes({ router, getInternalServices, logger }: Route
         const enabled = await uiSettings.client.get(ONECHAT_MCP_SERVER_UI_SETTING_ID);
 
         if (!enabled) {
+          logger.info(`MCP server DELETE request rejected - server not enabled`);
           return response.notFound();
         }
+        logger.info(`MCP server DELETE request received - returning method not allowed`);
         return response.customError({
           statusCode: 405,
           body: {

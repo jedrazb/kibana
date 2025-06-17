@@ -31,7 +31,6 @@ export class OnechatPlugin
     >
 {
   private logger: Logger;
-  // @ts-expect-error unused for now
   private config: OnechatConfig;
   private serviceManager = new ServiceManager();
 
@@ -66,18 +65,21 @@ export class OnechatPlugin
     });
 
     const router = coreSetup.http.createRouter();
-    registerRoutes({
-      router,
-      coreSetup,
-      logger: this.logger,
-      getInternalServices: () => {
-        const services = this.serviceManager.internalStart;
-        if (!services) {
-          throw new Error('getInternalServices called before service init');
-        }
-        return services;
+    registerRoutes(
+      {
+        router,
+        coreSetup,
+        logger: this.logger,
+        getInternalServices: () => {
+          const services = this.serviceManager.internalStart;
+          if (!services) {
+            throw new Error('getInternalServices called before service init');
+          }
+          return services;
+        },
       },
-    });
+      this.config
+    );
 
     return {
       tools: {
