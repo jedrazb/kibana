@@ -117,7 +117,7 @@ export function registerMCPOAuthRoutes(
               client_id: schema.string(),
               redirect_uri: schema.string(),
               response_type: schema.string(),
-              state: schema.string(),
+              state: schema.maybe(schema.string()), // to make it work with mcp inspector see https://github.com/modelcontextprotocol/inspector/issues/442
               code_challenge: schema.maybe(schema.string()),
               code_challenge_method: schema.maybe(schema.string()),
               scope: schema.maybe(schema.string()),
@@ -190,7 +190,7 @@ export function registerMCPOAuthRoutes(
           request: {
             query: schema.object({
               code: schema.maybe(schema.string()),
-              state: schema.string(),
+              state: schema.maybe(schema.string()),
               error: schema.maybe(schema.string()),
             }),
           },
@@ -216,7 +216,14 @@ export function registerMCPOAuthRoutes(
 
         try {
           // Decode the MCP state
-          const mcpStateData = JSON.parse(Buffer.from(state, 'base64').toString());
+          const mcpStateData = state
+            ? JSON.parse(Buffer.from(state, 'base64').toString())
+            : {
+                mcpClientId: '',
+                mcpRedirectUri: '',
+                mcpState: undefined,
+                codeChallenge: undefined,
+              };
 
           // Exchange GitHub code for access token
           const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {

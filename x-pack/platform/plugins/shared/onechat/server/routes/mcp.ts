@@ -32,7 +32,19 @@ async function validateOAuthToken(authHeader: string, logger: any): Promise<any>
 
   try {
     const token = authHeader.substring(7);
-    const tokenData = JSON.parse(Buffer.from(token, 'base64').toString());
+    logger.info(`Auth header: ${authHeader}`);
+    let tokenData;
+    try {
+      tokenData = JSON.parse(Buffer.from(token, 'base64').toString());
+    } catch (parseError) {
+      logger.error(`Failed to parse token: ${parseError.message}`);
+      return null;
+    }
+
+    if (!tokenData || !tokenData.githubToken || !tokenData.timestamp) {
+      logger.info(`OAuth token validation failed - invalid token structure`);
+      return null;
+    }
 
     // Check if token is not too old (1 hour)
     if (Date.now() - tokenData.timestamp > 60 * 60 * 1000) {
@@ -55,7 +67,7 @@ async function validateOAuthToken(authHeader: string, logger: any): Promise<any>
 
     return tokenData;
   } catch (err) {
-    logger.error('OAuth token validation error:', err);
+    logger.error(`OAuth token validation error: ${err}`);
     return null;
   }
 }
@@ -205,7 +217,14 @@ export function registerMCPRoutes(
     .get({
       path: MCP_SERVER_PATH,
       security: {
-        authz: { requiredPrivileges: [apiPrivileges.readOnechat] },
+        authz: {
+          enabled: false,
+          reason: 'This route supports both OAuth and internal Kibana auth',
+        },
+        authc: {
+          enabled: false,
+          reason: 'This route supports both OAuth and internal Kibana auth',
+        },
       },
       access: 'public',
       summary: 'MCP server',
@@ -247,7 +266,14 @@ export function registerMCPRoutes(
     .delete({
       path: MCP_SERVER_PATH,
       security: {
-        authz: { requiredPrivileges: [apiPrivileges.readOnechat] },
+        authz: {
+          enabled: false,
+          reason: 'This route supports both OAuth and internal Kibana auth',
+        },
+        authc: {
+          enabled: false,
+          reason: 'This route supports both OAuth and internal Kibana auth',
+        },
       },
       access: 'public',
       summary: 'MCP server',

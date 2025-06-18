@@ -20,6 +20,7 @@ import { registerRoutes } from './routes';
 import { ServiceManager } from './services';
 import { registerFeatures } from './features';
 import { ONECHAT_MCP_SERVER_UI_SETTING_ID } from '../common/constants';
+import { z } from '@kbn/zod';
 
 export class OnechatPlugin
   implements
@@ -49,6 +50,43 @@ export class OnechatPlugin
 
     registerFeatures({ features: pluginsSetup.features });
 
+    serviceSetups.tools.register({
+      id: 'onechat_tool',
+
+      description: 'Increments a number by 42',
+      meta: {
+        tags: ['increment', 'math'],
+      },
+      schema: z.object({
+        someNumber: z.number().describe('Some number'),
+      }),
+      handler: (args) => {
+        const { someNumber } = args as { someNumber: number };
+        return 42 + someNumber;
+      },
+    });
+
+    serviceSetups.tools.register({
+      id: 'onechat_list_indices',
+
+      description: 'List indices',
+      schema: z.object({
+        indexPattern: z.string().describe('Index pattern to filter on').optional(),
+      }),
+      handler: async ({ indexPattern }, { esClient }) => {
+        const indicesResponse = await esClient.asCurrentUser.cat.indices({
+          index: indexPattern,
+          format: 'json',
+        });
+
+        return indicesResponse.map((index) => ({
+          index: index.index,
+          health: index.health,
+          status: index.status,
+          docsCount: index.docsCount,
+        }));
+      },
+    });
     coreSetup.uiSettings.register({
       [ONECHAT_MCP_SERVER_UI_SETTING_ID]: {
         description: i18n.translate('onechat.uiSettings.mcpServer.description', {
